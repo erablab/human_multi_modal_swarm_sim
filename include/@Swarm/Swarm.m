@@ -1,5 +1,5 @@
 classdef Swarm < handle
-    
+
     properties
         N
         robots
@@ -8,7 +8,7 @@ classdef Swarm < handle
         phi
         hG
     end
-    
+
     methods
         function obj = Swarm(varargin)
             ip = inputParser;
@@ -17,7 +17,7 @@ classdef Swarm < handle
             addParameter(ip, 'environment', [])
             addParameter(ip, 'densityFunction', 'uniform')
             parse(ip,varargin{:})
-            
+
             obj.N = length(ip.Results.robots);
             obj.robots = ip.Results.robots;
             if obj.N == 1
@@ -53,7 +53,7 @@ classdef Swarm < handle
             obj.phi = ip.Results.densityFunction;
             obj.hG = struct('figure',[],'graph',[],'env',[],'density',[],'voronoiCells',[],'voronoiCentroids',[],'robots',[]);
         end
-        
+
         function q = getPoses(obj)
             d = size(obj.robots{1}.getPose(),1);
             q = NaN(d,obj.N);
@@ -64,36 +64,36 @@ classdef Swarm < handle
                 q = [q; zeros(1,obj.N)];
             end
         end
-        
+
         function neighbors = getNeighbors(obj, idx)
             neighbors = find(obj.L(idx, :) ~= 0);
             neighbors = neighbors(neighbors~=idx);
         end
-        
+
         function setPoses(obj, q)
             for i = 1 : obj.N
                 obj.robots{i}.setPose(q(:,i));
             end
         end
-        
+
         function moveSingleIntegrators(obj, v)
             for i = 1 : obj.N
                 obj.robots{i}.moveSingleIntegrator(v(:,i))
             end
         end
-        
+
         function moveUnicycles(obj, v)
             for i = 1 : obj.N
                 obj.robots{i}.moveUnicycle(v(:,i))
             end
         end
-        
+
         function goToPoints(obj, p, varargin)
             for i = 1 : obj.N
                 obj.robots{i}.goToPoint(p(:,i), varargin{:})
             end
         end
-        
+
         function [G,A,VC] = coverageControl(obj,varargin)
             if isempty(varargin)
                 p = eye(2,3)*obj.getPoses();
@@ -115,7 +115,7 @@ classdef Swarm < handle
                 A(i) = abs(Ai);
             end
         end
-        
+
         function c = evaluateCoverageCost(obj, q, VC, varargin)
             p = eye(2,3)*q;
             c = 0;
@@ -143,7 +143,42 @@ classdef Swarm < handle
                 c = c + ci;
             end
         end
-        
+
+        function f = evaluateHapticFeedback(obj, q, VC, varargin)
+            global SIGMA_11 SIGMA_22 mu
+            p = eye(2,3)*q;
+            f1 = 0;
+            f2 = 0;
+            if ~isempty(varargin)
+                idx = varargin{1};
+                VC = {VC{idx}};
+            end
+            for i = 1 : length(VC)
+                if isempty(varargin)
+                    idx = i;
+                end
+                P = VC{i};
+                xP = P(1,:);
+                yP = P(2,:);
+                if strcmp(obj.phi, 'uniform')
+                    
+                else
+                    phi_hat_1 = @(x,y) norm(p(:,idx)-[x;y])^2 * obj.phi(x,y) * SIGMA_11 * (x - mu(1));
+                    phi_hat_2 = @(x,y) norm(p(:,idx)-[x;y])^2 * obj.phi(x,y) * SIGMA_22 * (y - mu(2));
+                end
+                trngltn = delaunay(xP, yP);
+                fi1 = 0;
+                fi2 = 0;
+                for n = 1 : size(trngltn, 1)
+                    fi1 = fi1 + Swarm.intOfFOverT(phi_hat_1, 8, P(:,trngltn(n,:)));
+                    fi2 = fi2 + Swarm.intOfFOverT(phi_hat_2, 8, P(:,trngltn(n,:)));
+                end
+                f1 = f1 + fi1;
+                f2 = f2 + fi2;
+            end
+            f = [f1; f2];
+        end
+
         function plotFigure(obj)
             obj.hG.figure = figure('units','normalized','position',[0 0 1 1],'MenuBar','none','ToolBar','none','NumberTitle','off');
             hold on, axis equal
@@ -155,13 +190,13 @@ classdef Swarm < handle
             set(gca,'Visible','off')
             obj.hG.figure.CurrentAxes.Clipping = 'off';
         end
-        
+
         function plotRobots(obj, varargin)
             for i = 1 : obj.N
                 obj.robots{i}.plotRobot(varargin{:})
             end
         end
-        
+
         function plotRobotsFast(obj, q, varargin)
             if isempty(obj.hG.robots)
                 obj.hG.robots = scatter(q(1,:), q(2,:), varargin{:});
@@ -169,7 +204,7 @@ classdef Swarm < handle
                 set(obj.hG.robots, 'XData', q(1,:), 'YData', q(2,:));
             end
         end
-        
+
         function plotGraph(obj, varargin)
             if ~isempty(varargin)
                 args = varargin;
@@ -193,7 +228,7 @@ classdef Swarm < handle
                 end
             end
         end
-        
+
         function plotEnvironment(obj, varargin)
             if ~isempty(varargin)
                 args = varargin;
@@ -202,22 +237,38 @@ classdef Swarm < handle
             end
             obj.hG.env = plot(obj.environment(1,:), obj.environment(2,:), args{:});
         end
-        
+
         function plotDensity(obj, varargin)
             if ~strcmp(obj.phi, 'uniform')
-                [x,y] = meshgrid(min(obj.environment(1,:)):0.01:max(obj.environment(1,:)), min(obj.environment(2,:)):0.01:max(obj.environment(2,:)));
-                z = obj.phi(x,y);
-                caxis([min(z(:)),max(z(:))])
+                x = min(obj.environment(1,:)):0.01:max(obj.environment(1,:));
+                y = min(obj.environment(2,:)):0.01:max(obj.environment(2,:));
+                [X ,Y] = meshgrid(x, y);
+                Z = obj.phi(X, Y);
+                caxis([min(Z(:)),max(Z(:))])
                 if ~isempty(varargin)
-                    args = varargin;
+                    levels = varargin{1};
                 else
-                    args = {linspace(min(z(:)),max(z(:)),10), 'LineWidth', 2};
+                    levels = linspace(min(Z(:)),max(Z(:)),10);
                 end
-                [~, obj.hG.density] = contour(x, y, z, args{:});
+                M = contourc(x, y, Z, levels);
+                [xC, yC, zC] = Swarm.C2xyz(M);
+                if isempty(obj.hG.density)
+                    cmap = colormap(parula);
+                    subsample = floor(size(cmap, 1) / numel(levels));
+                    colors = fliplr(cmap(end : -subsample: 1, :)')';
+                    obj.hG.density = cell(numel(xC), 1);
+                    for i = 1 : numel(xC)
+                        obj.hG.density{i} = plot(xC{i}, yC{i}, 'LineWidth', 2, 'Color', colors(i, :));
+                    end
+                else
+                    for i = 1 : min(numel(xC), numel(obj.hG.density))
+                        set(obj.hG.density{i}, 'XData', xC{i}, 'YData', yC{i})
+                    end
+                end
                 obj.fillout(obj.environment(1,:),obj.environment(2,:),[min(obj.environment(1,:))-1 max(obj.environment(1,:))+1 min(obj.environment(2,:))-1 max(obj.environment(2,:))+1],0.94*[1 1 1]);
             end
         end
-        
+
         function plotVoronoiCells(obj, VC, varargin)
             if ~isempty(varargin)
                 args = varargin;
@@ -242,7 +293,7 @@ classdef Swarm < handle
                 set(obj.hG.voronoiCells, 'XData', vcite(1,:), 'YData', vcite(2,:))
             end
         end
-        
+
         function plotCentroids(obj, G, varargin)
             if ~isempty(varargin)
                 args = varargin;
@@ -256,7 +307,7 @@ classdef Swarm < handle
             end
         end
     end
-    
+
     methods (Access = private)
         function mirroredRobots = mirrorRobotsAboutEnvironmentBoundary(obj, p)
             mirroredRobots = nan(2,size(p,2)*(size(obj.environment,2)-1));
@@ -271,7 +322,7 @@ classdef Swarm < handle
                 end
             end
         end
-        
+
         function [G, A] = centroid(obj, P)
             if strcmp(obj.phi, 'uniform')
                 n = length(P);
@@ -311,7 +362,7 @@ classdef Swarm < handle
             end
         end
     end
-    
+
     methods (Static)
         function I = intOfFOverT(f, N, T)
             x1 = T(1,1);
@@ -331,7 +382,7 @@ classdef Swarm < handle
             end
             I = A*I;
         end
-        
+
         function xw = TriGaussPoints(n)
             % https://github.com/FMenhorn/BGCEGit/blob/master/Prototypes/MATLAB/Sandbox/BennisChaos/marchingCubes/L2Projection/TriGaussPoints.m
             xw = zeros(n,3);
@@ -407,7 +458,7 @@ classdef Swarm < handle
                     0.00839477740996 0.72849239295540 0.02723031417443];
             end
         end
-        
+
         function h = fillout(x,y,lims,varargin)
             % MMA 23-3-2006, mma@odyle.net
             h = [];
@@ -415,7 +466,7 @@ classdef Swarm < handle
                 disp(['## ',mfilename,' : more input arguments required']);
                 return
             end
-            
+
             if numel(x) > length(x)
                 x = Swarm.var_border(x);
             end
@@ -449,7 +500,7 @@ classdef Swarm < handle
             h=fill(x,y,varargin{:});
             set(h,'edgecolor','none');
         end
-        
+
         function [x,xc] = var_border(M)
             % MMA 18-8-2004, martinho@fis.ua.pt
             x  = [];
@@ -463,6 +514,69 @@ classdef Swarm < handle
             xb = M(1,:);    xb = flipud(xb');
             x =  [xl; xt; xr; xb];
             xc =  [xl(1) xl(end) xr(1) xr(end)];
+        end
+
+        function [x,y,z] = C2xyz(C)
+            % C2XYZ returns the x and y coordinates of contours in a contour
+            % matrix and their corresponding z values. C is the contour matrix given by
+            % the contour function.
+            %
+            %
+            %% Syntax
+            %
+            %  [x,y] = C2xyz(C)
+            %  [x,y,z] = C2xyz(C)
+            %
+            %% Description
+            %
+            % [x,y] = C2xyz(C) returns x and y coordinates of contours in a contour
+            % matrix C
+            %
+            % [x,y,z] = C2xyz(C) also returns corresponding z values.
+            %
+            %
+            %% Example
+            % Given a contour plot, you want to know the (x,y) coordinates of the contours,
+            % as well as the z value corresponding to each contour line.
+            %
+            % C = contour(peaks);
+            % [x,y,z] = C2xyz(C);
+            %
+            % This returns 1 x numberOfContourLines cells of x values and y values, and
+            % their corresponding z values are given in a 1 x numberOfContourLines
+            % array. If you'd like to plot a heavy black line along all of the z=0
+            % contours and a dotted red line along the z = -2 contours, try this:
+            %
+            % hold on; % Allows plotting atop the preexisting peaks plot.
+            % for n = find(z==0); % only loop through the z = 0 values.
+            %     plot(x{n},y{n},'k','linewidth',2)
+            % end
+            %
+            % for n = find(z==-2) % now loop through the z = -2 values.
+            %     plot(x{n},y{n},'r:','linewidth',2)
+            % end
+            %
+            % * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+            % Created by Chad Greene, August 2013.
+            %
+            % * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+            % See also contour, contourf, clabel, contour3, and C2xy.
+            m(1)=1;
+            n=1;
+            try
+                while n<length(C)
+                    n=n+1;
+                    m(n) = m(n-1)+C(2,m(n-1))+1;
+
+                end
+            end
+            for nn = 1:n-2
+                x{nn} = C(1,m(nn)+1:m(nn+1)-1);
+                y{nn} = C(2,m(nn)+1:m(nn+1)-1);
+                if nargout==3
+                    z(nn) = C(1,m(nn));
+                end
+            end
         end
     end
 end
